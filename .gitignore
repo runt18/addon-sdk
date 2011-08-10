@@ -1,3 +1,5 @@
+*.pyc
+.DS_Store
 local.json
 python-lib/cuddlefish/app-extension/components/jetpack.xpt
 testdocs.tgz
