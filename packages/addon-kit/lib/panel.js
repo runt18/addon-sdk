@@ -155,7 +155,10 @@ const Panel = Symbiont.resolve({
       // Jetpack, as we would like to display an iframe that completely fills 
       // the panel. 
       // -> Use a XBL wrapper with inner stylesheet to remove this padding.
-      let css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 0;}";
+      let css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 3px}";
+      if (!anchor) {
+          css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 0px}";
+      }
       let originalXBL = "chrome://global/content/bindings/popup.xml#arrowpanel";
       let binding = 
       '<bindings xmlns="http://www.mozilla.org/xbl">' +
