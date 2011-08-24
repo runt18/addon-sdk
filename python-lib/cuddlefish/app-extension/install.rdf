@@ -18,6 +18,8 @@
       </Description>
     </em:targetApplication>
 
+    <em:targetPlatform>Darwin</em:targetPlatform>
+
     <!-- Front End MetaData -->
     <em:name>Test App</em:name>
     <em:description>Harness for tests.</em:description>
