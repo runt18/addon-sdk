@@ -150,13 +150,13 @@ exports.ToolbarButton = function ToolbarButton(options) {
 
       // change the current position for open windows
       for each (var window in winUtils.windowIterator()) {
-        if ("chrome://browser/content/browser.xul" != window.location) return;
+        if ("chrome://browser/content/browser.xul" != window.location) continue;
 
         let doc = window.document;
         let $ = function (id) doc.getElementById(id);
 
         // if the move isn't being forced and it is already in the window, abort
-        if (!pos.forceMove && $(options.id)) return;
+        if (!pos.forceMove && $(options.id)) continue;
 
         var tb = $(toolbarID);
         var b4 = $(insertbefore);
