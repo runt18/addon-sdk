@@ -165,6 +165,11 @@ parser_groups = (
                                     action="store_true",
                                     default=False,
                                     cmds=['xpi'])),
+        (("", "--force-mobile",), dict(dest="enable_mobile",
+                                    help="Force compatibility with Firefox Mobile",
+                                    action="store_true",
+                                    default=False,
+                                    cmds=['run', 'test', 'xpi', 'testall'])),
         ]
      ),
 
@@ -564,15 +569,11 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     if "id" in target_cfg:
         jid = target_cfg["id"]
-        if not ("@" in jid or jid.startswith("{")):
-            jid = jid + "@jetpack"
-        unique_prefix = '%s-' % jid # used for resource: URLs
     else:
-        # The Jetpack ID is not required for cfx test, in which case we have to
-        # make one up based on the GUID.
-        unique_prefix = '%s-' % target
         jid = harness_guid
-
+    if not ("@" in jid or jid.startswith("{")):
+        jid = jid + "@jetpack"
+    unique_prefix = '%s-' % jid # used for resource: URLs
     bundle_id = jid
 
     # the resource: URL's prefix is treated too much like a DNS hostname
@@ -612,8 +613,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     cuddlefish_js_path = os.path.join(pkg_cfg.packages["api-utils"].root_dir,
                                       "lib", "cuddlefish.js")
     loader_modules = [("api-utils", "lib", "cuddlefish", cuddlefish_js_path)]
+    scan_tests = command == "test"
     try:
-        manifest = build_manifest(target_cfg, pkg_cfg, deps, uri_prefix, False,
+        manifest = build_manifest(target_cfg, pkg_cfg, deps, uri_prefix, scan_tests,
                                   loader_modules)
     except ModuleNotFoundError, e:
         print str(e)
@@ -657,7 +659,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     if command == "test":
         # This should be contained in the test runner package.
-        harness_options['main'] = 'run-tests'
+        harness_options['main'] = 'test-harness/run-tests'
     else:
         harness_options['main'] = target_cfg.get('main')
 
@@ -677,49 +679,46 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         app_extension_dir = os.path.abspath(options.templatedir)
     else:
         mydir = os.path.dirname(os.path.abspath(__file__))
-        if sys.platform == "darwin":
-            # If we're on OS X, at least point into the XULRunner
-            # app dir so we run as a proper app if using XULRunner.
-            app_extension_dir = os.path.join(mydir, "Test App.app",
-                                             "Contents", "Resources")
-        else:
-            app_extension_dir = os.path.join(mydir, "app-extension")
+        app_extension_dir = os.path.join(mydir, "app-extension")
 
     harness_options['manifest'] = manifest.get_harness_options_manifest(uri_prefix)
 
+    from cuddlefish.rdf import gen_manifest, RDFUpdate
+
+    manifest_rdf = gen_manifest(template_root_dir=app_extension_dir,
+                                target_cfg=target_cfg,
+                                bundle_id=bundle_id,
+                                update_url=options.update_url,
+                                bootstrap=True,
+                                enable_mobile=options.enable_mobile)
+
+    if command == "xpi" and options.update_link:
+        rdf_name = UPDATE_RDF_FILENAME % target_cfg.name
+        print >>stdout, "Exporting update description to %s." % rdf_name
+        update = RDFUpdate()
+        update.add(manifest_rdf, options.update_link)
+        open(rdf_name, "w").write(str(update))
+
+    # ask the manifest what files were used, so we can construct an XPI
+    # without the rest. This will include the loader (and everything it
+    # uses) because of the "loader_modules" starting points we passed to
+    # build_manifest earlier
+    used_files = None
+    if command == "xpi":
+      used_files = set(manifest.get_used_files())
+
+    if options.strip_xpi:
+        print >>stdout, "--strip-xpi is now the default: argument ignored"
+    if options.no_strip_xpi:
+        used_files = None # disables the filter, includes all files
+
     if command == 'xpi':
         from cuddlefish.xpi import build_xpi
-        from cuddlefish.rdf import gen_manifest, RDFUpdate
-
-        manifest_rdf = gen_manifest(template_root_dir=app_extension_dir,
-                                    target_cfg=target_cfg,
-                                    bundle_id=bundle_id,
-                                    update_url=options.update_url,
-                                    bootstrap=True)
-
-        if options.update_link:
-            rdf_name = UPDATE_RDF_FILENAME % target_cfg.name
-            print >>stdout, "Exporting update description to %s." % rdf_name
-            update = RDFUpdate()
-            update.add(manifest_rdf, options.update_link)
-            open(rdf_name, "w").write(str(update))
-
-        # ask the manifest what files were used, so we can construct an XPI
-        # without the rest. This will include the loader (and everything it
-        # uses) because of the "loader_modules" starting points we passed to
-        # build_manifest earlier
-        used_files = set(manifest.get_used_files())
-
-        if options.strip_xpi:
-            print >>stdout, "--strip-xpi is now the default: argument ignored"
-        if options.no_strip_xpi:
-            used_files = None # disables the filter, includes all files
-
-        xpi_name = XPI_FILENAME % target_cfg.name
-        print >>stdout, "Exporting extension to %s." % xpi_name
+        xpi_path = XPI_FILENAME % target_cfg.name
+        print >>stdout, "Exporting extension to %s." % xpi_path
         build_xpi(template_root_dir=app_extension_dir,
                   manifest=manifest_rdf,
-                  xpi_name=xpi_name,
+                  xpi_path=xpi_path,
                   harness_options=harness_options,
                   limit_to=used_files)
     else:
@@ -734,6 +733,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
         try:
             retval = run_app(harness_root_dir=app_extension_dir,
+                             manifest_rdf=manifest_rdf,
                              harness_options=harness_options,
                              app_type=options.app,
                              binary=options.binary,
@@ -743,7 +743,9 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              logfile=options.logfile,
                              addons=options.addons,
                              args=options.cmdargs,
-                             norun=options.no_run)
+                             norun=options.no_run,
+                             used_files=used_files,
+                             enable_mobile=options.enable_mobile)
         except Exception, e:
             if str(e).startswith(MOZRUNNER_BIN_NOT_FOUND):
                 print >>sys.stderr, MOZRUNNER_BIN_NOT_FOUND_HELP.strip()
