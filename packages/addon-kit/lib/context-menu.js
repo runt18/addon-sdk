@@ -693,7 +693,7 @@ WorkerRegistry.prototype = {
     if ((innerWinID in this.winWorkers) ||
         (innerWinID in this.winsWithoutWorkers))
       return;
-    if (this._doesURLNeedWorker(win.document.URL))
+    if (win.document && this._doesURLNeedWorker(win.document.URL))
       this.winWorkers[innerWinID] = { win: win, worker: this._makeWorker(win) };
     else
       this.winsWithoutWorkers[innerWinID] = win;
