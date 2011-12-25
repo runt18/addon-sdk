@@ -140,8 +140,9 @@ parser_groups = (
 
     ("Experimental Command-Specific Options", [
         (("-a", "--app",), dict(dest="app",
-                                help=("app to run: firefox (default), "
-                                      "xulrunner, fennec, or thunderbird"),
+                                help=("app to run: firefox (default), fennec, "
+                                      "fennec-on-device, xulrunner or "
+                                      "thunderbird"),
                                 metavar=None,
                                 default="firefox",
                                 cmds=['test', 'run', 'testex', 'testpkgs',
@@ -165,6 +166,20 @@ parser_groups = (
                                     action="store_true",
                                     default=False,
                                     cmds=['run', 'test', 'xpi', 'testall'])),
+        (("", "--mobile-app",), dict(dest="mobile_app_name",
+                                    help=("Name of your Android application to "
+                                          "use. Possible values: 'firefox', "
+                                          "'firefox_beta', 'firefox_nightly'."),
+                                    metavar=None,
+                                    default=None,
+                                    cmds=['run', 'test', 'testall'])),
+        (("", "--harness-option",), dict(dest="extra_harness_option_args",
+                                         help=("Extra properties added to "
+                                               "harness-options.json"),
+                                         action="append",
+                                         metavar="KEY=VALUE",
+                                         default=[],
+                                         cmds=['xpi'])),
         ]
      ),
 
@@ -222,9 +237,6 @@ parser_groups = (
         ]
      ),
     )
-
-# Maximum time we'll wait for tests to finish, in seconds.
-TEST_RUN_TIMEOUT = 10 * 60
 
 def find_parent_package(cur_dir):
     tail = True
@@ -467,7 +479,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             docs_home = generate.generate_docs(env_root, filename=args[1])
         else:
             docs_home = generate.generate_docs(env_root)
-        webbrowser.open(docs_home)
+            webbrowser.open(docs_home)
         return
     elif command == "sdocs":
         from cuddlefish.docs import generate
@@ -499,16 +511,16 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # a Mozilla application (which includes running tests).
 
     use_main = False
-    timeout = None
     inherited_options = ['verbose', 'enable_e10s']
+    enforce_timeouts = False
 
     if command == "xpi":
         use_main = True
     elif command == "test":
         if 'tests' not in target_cfg:
             target_cfg['tests'] = []
-        timeout = TEST_RUN_TIMEOUT
         inherited_options.extend(['iterations', 'filter', 'profileMemory'])
+        enforce_timeouts = True
     elif command == "run":
         use_main = True
     else:
@@ -707,13 +719,18 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     if command == 'xpi':
         from cuddlefish.xpi import build_xpi
+        extra_harness_options = {}
+        for kv in options.extra_harness_option_args:
+            key,value = kv.split("=", 1)
+            extra_harness_options[key] = value
         xpi_path = XPI_FILENAME % target_cfg.name
         print >>stdout, "Exporting extension to %s." % xpi_path
         build_xpi(template_root_dir=app_extension_dir,
                   manifest=manifest_rdf,
                   xpi_path=xpi_path,
                   harness_options=harness_options,
-                  limit_to=used_files)
+                  limit_to=used_files,
+                  extra_harness_options=extra_harness_options)
     else:
         from cuddlefish.runner import run_app
 
@@ -732,13 +749,14 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              binary=options.binary,
                              profiledir=options.profiledir,
                              verbose=options.verbose,
-                             timeout=timeout,
+                             enforce_timeouts=enforce_timeouts,
                              logfile=options.logfile,
                              addons=options.addons,
                              args=options.cmdargs,
                              norun=options.no_run,
                              used_files=used_files,
-                             enable_mobile=options.enable_mobile)
+                             enable_mobile=options.enable_mobile,
+                             mobile_app_name=options.mobile_app_name)
         except Exception, e:
             if str(e).startswith(MOZRUNNER_BIN_NOT_FOUND):
                 print >>sys.stderr, MOZRUNNER_BIN_NOT_FOUND_HELP.strip()
