@@ -14,6 +14,33 @@ xpi_template_path = os.path.join(test_packaging.static_files_path,
 
 fake_manifest = '<RDF><!-- Extension metadata is here. --></RDF>'
 
+class PrefsTests(unittest.TestCase):
+    def makexpi(self, pkg_name):
+        self.xpiname = "%s.xpi" % pkg_name
+        create_xpi(self.xpiname, pkg_name, 'preferences-files')
+        self.xpi = zipfile.ZipFile(self.xpiname, 'r')
+        options = self.xpi.read('harness-options.json')
+        self.xpi_harness_options = json.loads(options)
+
+    def setUp(self):
+        self.xpiname = None
+        self.xpi = None
+
+    def tearDown(self):
+        if self.xpi:
+            self.xpi.close()
+        if self.xpiname and os.path.exists(self.xpiname):
+            os.remove(self.xpiname)
+
+    def testPackageWithSimplePrefs(self):
+        self.makexpi('simple-prefs')
+        assert 'options.xul' in self.xpi.namelist()
+
+    def testPackageWithNoPrefs(self):
+        self.makexpi('no-prefs')
+        assert 'options.xul' not in self.xpi.namelist()
+
+
 class Bug588119Tests(unittest.TestCase):
     def makexpi(self, pkg_name):
         self.xpiname = "%s.xpi" % pkg_name
@@ -25,7 +52,7 @@ class Bug588119Tests(unittest.TestCase):
     def setUp(self):
         self.xpiname = None
         self.xpi = None
-        
+
     def tearDown(self):
         if self.xpi:
             self.xpi.close()
@@ -60,6 +87,36 @@ class Bug588119Tests(unittest.TestCase):
         self.makexpi('implicit-icon')
         assert 'icon64' not in self.xpi_harness_options
 
+class ExtraHarnessOptions(unittest.TestCase):
+    def setUp(self):
+        self.xpiname = None
+        self.xpi = None
+
+    def tearDown(self):
+        if self.xpi:
+            self.xpi.close()
+        if self.xpiname and os.path.exists(self.xpiname):
+            os.remove(self.xpiname)
+
+    def testOptions(self):
+        pkg_name = "extra-options"
+        self.xpiname = "%s.xpi" % pkg_name
+        create_xpi(self.xpiname, pkg_name, "bug-669274-files",
+                   extra_harness_options={"builderVersion": "futuristic"})
+        self.xpi = zipfile.ZipFile(self.xpiname, 'r')
+        options = self.xpi.read('harness-options.json')
+        hopts = json.loads(options)
+        self.failUnless("builderVersion" in hopts)
+        self.failUnlessEqual(hopts["builderVersion"], "futuristic")
+
+    def testBadOptionName(self):
+        pkg_name = "extra-options"
+        self.xpiname = "%s.xpi" % pkg_name
+        self.failUnlessRaises(xpi.HarnessOptionAlreadyDefinedError,
+                              create_xpi,
+                              self.xpiname, pkg_name, "bug-669274-files",
+                              extra_harness_options={"main": "already in use"})
+
 class SmallXPI(unittest.TestCase):
     def setUp(self):
         self.root = up(os.path.abspath(__file__), 4)
@@ -87,8 +144,7 @@ class SmallXPI(unittest.TestCase):
                                          packagepath=package_path)
         deps = packaging.get_deps_for_targets(pkg_cfg,
                                               [target_cfg.name, "addon-kit"])
-        m = manifest.build_manifest(target_cfg, pkg_cfg, deps,
-                                    "P/", scan_tests=False)
+        m = manifest.build_manifest(target_cfg, pkg_cfg, deps, scan_tests=False)
         used_files = list(m.get_used_files())
         here = up(os.path.abspath(__file__))
         def absify(*parts):
@@ -111,7 +167,6 @@ class SmallXPI(unittest.TestCase):
 
         build = packaging.generate_build_for_target(pkg_cfg, target_cfg.name,
                                                     used_deps,
-                                                    prefix="p-",
                                                     include_tests=False)
         options = {'main': target_cfg.main}
         options.update(build)
@@ -130,26 +185,32 @@ class SmallXPI(unittest.TestCase):
                     # one in tests/static-files/xpi-template doesn't
                     "harness-options.json",
                     "install.rdf",
+                    "defaults/preferences/prefs.js",
                     "resources/",
-                    "resources/p-api-utils-data/",
-                    "resources/p-api-utils-lib/",
-                    "resources/p-three-lib/",
-                    "resources/p-three-lib/main.js",
-                    "resources/p-three-a-data/",
-                    "resources/p-three-a-data/msg.txt",
-                    "resources/p-three-a-data/subdir/",
-                    "resources/p-three-a-data/subdir/submsg.txt",
-                    "resources/p-three-a-lib/",
-                    "resources/p-three-a-lib/main.js",
-                    "resources/p-three-a-lib/subdir/",
-                    "resources/p-three-a-lib/subdir/subfile.js",
-                    "resources/p-three-b-lib/",
-                    "resources/p-three-b-lib/main.js",
-                    "resources/p-three-c-lib/",
-                    "resources/p-three-c-lib/main.js",
-                    "resources/p-three-c-lib/sub/",
-                    "resources/p-three-c-lib/sub/foo.js",
-                    # notably absent: p-three-a-lib/unused.js
+                    "resources/api-utils/",
+                    "resources/api-utils/data/",
+                    "resources/api-utils/lib/",
+                    "resources/three/",
+                    "resources/three/lib/",
+                    "resources/three/lib/main.js",
+                    "resources/three-a/",
+                    "resources/three-a/data/",
+                    "resources/three-a/data/msg.txt",
+                    "resources/three-a/data/subdir/",
+                    "resources/three-a/data/subdir/submsg.txt",
+                    "resources/three-a/lib/",
+                    "resources/three-a/lib/main.js",
+                    "resources/three-a/lib/subdir/",
+                    "resources/three-a/lib/subdir/subfile.js",
+                    "resources/three-b/",
+                    "resources/three-b/lib/",
+                    "resources/three-b/lib/main.js",
+                    "resources/three-c/",
+                    "resources/three-c/lib/",
+                    "resources/three-c/lib/main.js",
+                    "resources/three-c/lib/sub/",
+                    "resources/three-c/lib/sub/foo.js",
+                    # notably absent: three-a/lib/unused.js
                     ]
         # showing deltas makes failures easier to investigate
         missing = set(expected) - set(names)
@@ -208,14 +269,16 @@ def document_dir_files(path):
         print "%s:" % filename
         print "  %s" % contents
 
-def create_xpi(xpiname, pkg_name='aardvark', dirname='static-files'):
+def create_xpi(xpiname, pkg_name='aardvark', dirname='static-files',
+               extra_harness_options={}):
     configs = test_packaging.get_configs(pkg_name, dirname)
     options = {'main': configs.target_cfg.main}
     options.update(configs.build)
     xpi.build_xpi(template_root_dir=xpi_template_path,
                   manifest=fake_manifest,
                   xpi_path=xpiname,
-                  harness_options=options)
+                  harness_options=options,
+                  extra_harness_options=extra_harness_options)
 
 if __name__ == '__main__':
     unittest.main()

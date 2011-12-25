@@ -19,6 +19,8 @@
  *
  * Contributor(s):
  *   Atul Varma <atul@mozilla.com>
+ *   Irakli Gozalishvili <gozala@mozilla.com>
+ *   Erik Vold <erikvvold@gmail.com>
  *
  * Alternatively, the contents of this file may be used under the terms of
  * either the GNU General Public License Version 2 or later (the "GPL"), or
@@ -36,19 +38,21 @@
 
 "use strict";
 
-const {Cc,Ci} = require("chrome");
-
-var errors = require("./errors");
-
-var gWindowWatcher = Cc["@mozilla.org/embedcomp/window-watcher;1"]
-                     .getService(Ci.nsIWindowWatcher);
-
+const { Cc, Ci } = require("chrome");
 const { EventEmitter } = require('./events'),
       { Trait } = require('./traits');
+const errors = require("./errors");
+
+const gWindowWatcher = Cc["@mozilla.org/embedcomp/window-watcher;1"].
+                       getService(Ci.nsIWindowWatcher);
+const appShellService = Cc["@mozilla.org/appshell/appShellService;1"].
+                        getService(Ci.nsIAppShellService);
+
+const XUL = 'http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul';
 
 /**
  * An iterator for XUL windows currently in the application.
- * 
+ *
  * @return A generator that yields XUL windows exposing the
  *         nsIDOMWindow interface.
  */
@@ -73,11 +77,17 @@ function browserWindowIterator() {
 exports.browserWindowIterator = browserWindowIterator;
 
 var WindowTracker = exports.WindowTracker = function WindowTracker(delegate) {
-  this.delegate = delegate;
+   if (!(this instanceof WindowTracker)) {
+     return new WindowTracker(delegate);
+   }
+
+  this._delegate = delegate;
   this._loadingWindows = [];
+
   for (let window in windowIterator())
     this._regWindow(window);
   gWindowWatcher.registerNotification(this);
+
   require("./unload").ensure(this);
 };
 
@@ -99,15 +109,15 @@ WindowTracker.prototype = {
   _regWindow: function _regWindow(window) {
     if (window.document.readyState == "complete") {
       this._unregLoadingWindow(window);
-      this.delegate.onTrack(window);
+      this._delegate.onTrack(window);
     } else
       this._regLoadingWindow(window);
   },
 
   _unregWindow: function _unregWindow(window) {
     if (window.document.readyState == "complete") {
-      if (this.delegate.onUntrack)
-        this.delegate.onUntrack(window);
+      if (this._delegate.onUntrack)
+        this._delegate.onUntrack(window);
     } else {
       this._unregLoadingWindow(window);
     }
@@ -119,30 +129,28 @@ WindowTracker.prototype = {
       this._unregWindow(window);
   },
 
-  handleEvent: function handleEvent(event) {
+  handleEvent: errors.catchAndLog(function handleEvent(event) {
     if (event.type == "load" && event.target) {
       var window = event.target.defaultView;
       if (window)
         this._regWindow(window);
     }
-  },
+  }),
 
-  observe: function observe(subject, topic, data) {
+  observe: errors.catchAndLog(function observe(subject, topic, data) {
     var window = subject.QueryInterface(Ci.nsIDOMWindow);
     if (topic == "domwindowopened")
       this._regWindow(window);
     else
       this._unregWindow(window);
-  }
+  })
 };
-
-errors.catchAndLogProps(WindowTracker.prototype, ["handleEvent", "observe"]);
 
 const WindowTrackerTrait = Trait.compose({
   _onTrack: Trait.required,
   _onUntrack: Trait.required,
   constructor: function WindowTrackerTrait() {
-    new WindowTracker({
+    WindowTracker({
       onTrack: this._onTrack.bind(this),
       onUntrack: this._onUntrack.bind(this)
     });
@@ -207,6 +215,58 @@ function isBrowser(window) {
          "navigator:browser";
 };
 exports.isBrowser = isBrowser;
+
+exports.hiddenWindow = appShellService.hiddenDOMWindow;
+
+function createHiddenXULFrame() {
+  return function promise(deliver) {
+    let window = appShellService.hiddenDOMWindow;
+    let document = window.document;
+    let isXMLDoc = (document.contentType == "application/xhtml+xml" ||
+                    document.contentType == "application/vnd.mozilla.xul+xml")
+
+    if (isXMLDoc) {
+      deliver(window)
+    }
+    else {
+      let frame = document.createElement('iframe');
+      // This is ugly but we need window for XUL document in order to create
+      // browser elements.
+      frame.setAttribute('src', 'chrome://browser/content/hiddenWindow.xul');
+      frame.addEventListener('DOMContentLoaded', function onLoad(event) {
+        frame.removeEventListener('DOMContentLoaded', onLoad, false);
+        deliver(frame.contentWindow);
+      }, false);
+      document.documentElement.appendChild(frame);
+    }
+  }
+};
+exports.createHiddenXULFrame = createHiddenXULFrame;
+
+exports.createRemoteBrowser = function createRemoteBrowser(remote) {
+  return function promise(deliver) {
+    createHiddenXULFrame()(function(hiddenWindow) {
+      let document = hiddenWindow.document;
+      let browser = document.createElementNS(XUL, "browser");
+      // Remote="true" enable everything here:
+      // http://mxr.mozilla.org/mozilla-central/source/content/base/src/nsFrameLoader.cpp#1347
+      if (remote !== false)
+        browser.setAttribute("remote","true");
+      // Type="content" is mandatory to enable stuff here:
+      // http://mxr.mozilla.org/mozilla-central/source/content/base/src/nsFrameLoader.cpp#1776
+      browser.setAttribute("type","content");
+      // We remove XBL binding to avoid execution of code that is not going to work
+      // because browser has no docShell attribute in remote mode (for example)
+      browser.setAttribute("style","-moz-binding: none;");
+      // Flex it in order to be visible (optional, for debug purpose)
+      browser.setAttribute("flex", "1");
+      document.documentElement.appendChild(browser);
+
+      // Return browser
+      deliver(browser);
+    });
+  };
+};
 
 require("./unload").when(
   function() {

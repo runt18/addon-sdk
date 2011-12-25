@@ -1,6 +1,7 @@
 var windowUtils = require("window-utils");
 var timer = require("timer");
 var {Cc,Ci} = require("chrome");
+var { Loader } = require("./helpers");
 
 function makeEmptyWindow() {
   var xulNs = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -42,7 +43,7 @@ exports.testCloseOnUnload = function(test) {
     }
   };
 
-  var loader = test.makeSandboxedLoader();
+  let loader = Loader(module);
   loader.require("window-utils").closeOnUnload(fakeWindow);
   test.assertEqual(fakeWindow._listeners.length, 1,
                    "unload listener added on closeOnUnload()");
@@ -96,7 +97,49 @@ exports.testWindowWatcher = function(test) {
     }
   };
 
+  // test bug 638007 (new is optional), using new
   var wt = new windowUtils.WindowTracker(delegate);
+  myWindow = makeEmptyWindow();
+  test.waitUntilDone(5000);
+};
+
+exports.testWindowWatcherUntracker = function(test) {
+  var myWindow;
+  var tracks = 0;
+  var unloadCalled = false;
+
+  var delegate = {
+    onTrack: function(window) {
+      tracks = tracks + 1;
+      if (window == myWindow) {
+        test.pass("onTrack() called with our test window");
+        timer.setTimeout(function() {
+          myWindow.close();
+        }, 1);
+      }
+    },
+    onUntrack: function(window) {
+      tracks = tracks - 1;
+      if (window == myWindow && !unloadCalled) {
+        unloadCalled = true;
+        timer.setTimeout(function() {
+          wt.unload();
+        }, 1);
+      }
+      if (0 > tracks) {
+        test.fail("WindowTracker onUntrack was called more times than onTrack..");
+      }
+      else if (0 == tracks) {
+        timer.setTimeout(function() {
+            myWindow = null;
+            test.done();
+        }, 1);
+      }
+    }
+  };
+
+  // test bug 638007 (new is optional), not using new
+  var wt = windowUtils.WindowTracker(delegate);
   myWindow = makeEmptyWindow();
   test.waitUntilDone(5000);
 };
@@ -189,13 +232,10 @@ exports.testActiveWindow = function(test) {
 
   let testRunnerWindow = Cc["@mozilla.org/appshell/window-mediator;1"]
                          .getService(Ci.nsIWindowMediator)
-                         .getMostRecentWindow(null);
+                         .getMostRecentWindow("test:runner");
   let browserWindow =  Cc["@mozilla.org/appshell/window-mediator;1"]
                       .getService(Ci.nsIWindowMediator)
                       .getMostRecentWindow("navigator:browser");
-
-  test.assertEqual(windowUtils.activeWindow, testRunnerWindow,
-                    "Test runner is the active window.");
 
   test.assertEqual(windowUtils.activeBrowserWindow, browserWindow,
                     "Browser window is the active browser window.");
@@ -209,22 +249,19 @@ exports.testActiveWindow = function(test) {
     function() {
       test.assertEqual(windowUtils.activeWindow, browserWindow,
                        "Correct active window [1]");
-      windowUtils.activeWindow = testRunnerWindow;
-      continueAfterFocus(testRunnerWindow);
+      continueAfterFocus(windowUtils.activeWindow = testRunnerWindow);
     },
     function() {
       test.assertEqual(windowUtils.activeWindow, testRunnerWindow,
                        "Correct active window [2]");
       test.assertEqual(windowUtils.activeBrowserWindow, browserWindow,
                        "Correct active browser window [3]");
-      windowUtils.activeWindow = browserWindow;
-      continueAfterFocus(browserWindow);
+      continueAfterFocus(windowUtils.activeWindow = browserWindow);
     },
     function() {
       test.assertEqual(windowUtils.activeWindow, browserWindow,
                        "Correct active window [4]");
-      windowUtils.activeWindow = testRunnerWindow;
-      continueAfterFocus(testRunnerWindow);
+      continueAfterFocus(windowUtils.activeWindow = testRunnerWindow);
     },
     function() {
       test.assertEqual(windowUtils.activeWindow, testRunnerWindow,

@@ -191,6 +191,9 @@ class Profile(object):
                         data = compressed_file.read(name)
                         f = open(os.path.join(tmpdir, name), 'wb')
                         f.write(data) ; f.close()
+                        zi = compressed_file.getinfo(name)
+                        os.chmod(os.path.join(tmpdir,name),
+                                 (zi.external_attr>>16))
                 addon = tmpdir
 
             tree = ElementTree.ElementTree(file=os.path.join(addon, 'install.rdf'))
@@ -353,16 +356,34 @@ class Runner(object):
 
             # find the default executable from the windows registry
             try:
-                # assumes self.app_name is defined, as it should be for
-                # implementors
                 import _winreg
-                app_key = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, r"Software\Mozilla\Mozilla %s" % self.app_name)
-                version, _type = _winreg.QueryValueEx(app_key, "CurrentVersion")
-                version_key = _winreg.OpenKey(app_key, version + r"\Main")
-                path, _ = _winreg.QueryValueEx(version_key, "PathToExe")
-                return path
-            except: # XXX not sure what type of exception this should be
+            except ImportError:
                 pass
+            else:
+                sam_flags = [0]
+                # KEY_WOW64_32KEY etc only appeared in 2.6+, but that's OK as
+                # only 2.6+ has functioning 64bit builds.
+                if hasattr(_winreg, "KEY_WOW64_32KEY"):
+                    if "64 bit" in sys.version:
+                        # a 64bit Python should also look in the 32bit registry
+                        sam_flags.append(_winreg.KEY_WOW64_32KEY)
+                    else:
+                        # possibly a 32bit Python on 64bit Windows, so look in
+                        # the 64bit registry incase there is a 64bit app.
+                        sam_flags.append(_winreg.KEY_WOW64_64KEY)
+                for sam_flag in sam_flags:
+                    try:
+                        # assumes self.app_name is defined, as it should be for
+                        # implementors
+                        keyname = r"Software\Mozilla\Mozilla %s" % self.app_name
+                        sam = _winreg.KEY_READ | sam_flag
+                        app_key = _winreg.OpenKey(_winreg.HKEY_LOCAL_MACHINE, keyname, 0, sam)
+                        version, _type = _winreg.QueryValueEx(app_key, "CurrentVersion")
+                        version_key = _winreg.OpenKey(app_key, version + r"\Main")
+                        path, _ = _winreg.QueryValueEx(version_key, "PathToExe")
+                        return path
+                    except _winreg.error:
+                        pass
 
             # search for the binary in the path            
             for name in reversed(self.names):

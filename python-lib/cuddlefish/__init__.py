@@ -6,8 +6,7 @@ import webbrowser
 from copy import copy
 import simplejson as json
 from cuddlefish import packaging
-from cuddlefish.bunch import Bunch
-from cuddlefish.version import get_version
+from cuddlefish._version import get_versions
 
 MOZRUNNER_BIN_NOT_FOUND = 'Mozrunner could not locate your binary'
 MOZRUNNER_BIN_NOT_FOUND_HELP = """
@@ -140,8 +139,9 @@ parser_groups = (
 
     ("Experimental Command-Specific Options", [
         (("-a", "--app",), dict(dest="app",
-                                help=("app to run: firefox (default), "
-                                      "xulrunner, fennec, or thunderbird"),
+                                help=("app to run: firefox (default), fennec, "
+                                      "fennec-on-device, xulrunner or "
+                                      "thunderbird"),
                                 metavar=None,
                                 default="firefox",
                                 cmds=['test', 'run', 'testex', 'testpkgs',
@@ -165,6 +165,26 @@ parser_groups = (
                                     action="store_true",
                                     default=False,
                                     cmds=['run', 'test', 'xpi', 'testall'])),
+        (("", "--mobile-app",), dict(dest="mobile_app_name",
+                                    help=("Name of your Android application to "
+                                          "use. Possible values: 'firefox', "
+                                          "'firefox_beta', 'firefox_nightly'."),
+                                    metavar=None,
+                                    default=None,
+                                    cmds=['run', 'test', 'testall'])),
+        (("", "--harness-option",), dict(dest="extra_harness_option_args",
+                                         help=("Extra properties added to "
+                                               "harness-options.json"),
+                                         action="append",
+                                         metavar="KEY=VALUE",
+                                         default=[],
+                                         cmds=['xpi'])),
+        (("", "--stop-on-error",), dict(dest="stopOnError",
+                                  help="Stop running tests after the first failure",
+                                  action="store_true",
+                                  metavar=None,
+                                  default=False,
+                                  cmds=['test', 'testex', 'testpkgs'])),
         ]
      ),
 
@@ -223,9 +243,6 @@ parser_groups = (
      ),
     )
 
-# Maximum time we'll wait for tests to finish, in seconds.
-TEST_RUN_TIMEOUT = 10 * 60
-
 def find_parent_package(cur_dir):
     tail = True
     while tail:
@@ -246,8 +263,10 @@ class CfxOption(optparse.Option):
     TYPE_CHECKER = copy(optparse.Option.TYPE_CHECKER)
     TYPE_CHECKER['json'] = check_json
 
-def parse_args(arguments, global_options, usage, parser_groups, defaults=None):
-    parser = optparse.OptionParser(usage=usage.strip(), option_class=CfxOption)
+def parse_args(arguments, global_options, usage, version, parser_groups,
+               defaults=None):
+    parser = optparse.OptionParser(usage=usage.strip(), option_class=CfxOption,
+                                   version=version)
 
     def name_cmp(a, b):
         # a[0]    = name sequence
@@ -301,20 +320,22 @@ def test_all(env_root, defaults):
     if result.failures or result.errors:
         fail = True
 
-    print >>sys.stderr, "Testing all examples..."
-    sys.stderr.flush()
+    if not fail or not defaults.get("stopOnError"):
+        print >>sys.stderr, "Testing all examples..."
+        sys.stderr.flush()
 
-    try:
-        test_all_examples(env_root, defaults)
-    except SystemExit, e:
-        fail = (e.code != 0) or fail
+        try:
+            test_all_examples(env_root, defaults)
+        except SystemExit, e:
+            fail = (e.code != 0) or fail
 
-    print >>sys.stderr, "Testing all packages..."
-    sys.stderr.flush()
-    try:
-        test_all_packages(env_root, defaults)
-    except SystemExit, e:
-        fail = (e.code != 0) or fail
+    if not fail or not defaults.get("stopOnError"):
+        print >>sys.stderr, "Testing all packages..."
+        sys.stderr.flush()
+        try:
+            test_all_packages(env_root, defaults)
+        except SystemExit, e:
+            fail = (e.code != 0) or fail
 
     if fail:
         print >>sys.stderr, "Some tests were unsuccessful."
@@ -352,23 +373,37 @@ def test_all_examples(env_root, defaults):
                 env_root=env_root)
         except SystemExit, e:
             fail = (e.code != 0) or fail
+        if fail and defaults.get("stopOnError"):
+            break
 
     if fail:
+        print >>sys.stderr, "Some examples tests were unsuccessful."
         sys.exit(-1)
 
 def test_all_packages(env_root, defaults):
-    deps = []
-    target_cfg = Bunch(name = "testpkgs", dependencies = deps, version="fake")
-    pkg_cfg = packaging.build_config(env_root, target_cfg)
-    for name in pkg_cfg.packages:
-        if name != "testpkgs":
-            deps.append(name)
-    print >>sys.stderr, "Testing all available packages: %s." % (", ".join(deps))
+    packages_dir = os.path.join(env_root, "packages")
+    packages = [dirname for dirname in os.listdir(packages_dir)
+                if os.path.isdir(os.path.join(packages_dir, dirname))]
+    packages.sort()
+    print >>sys.stderr, "Testing all available packages: %s." % (", ".join(packages))
     sys.stderr.flush()
-    run(arguments=["test", "--dependencies"],
-        target_cfg=target_cfg,
-        pkg_cfg=pkg_cfg,
-        defaults=defaults)
+    fail = False
+    for dirname in packages:
+        print >>sys.stderr, "Testing %s..." % dirname
+        sys.stderr.flush()
+        try:
+            run(arguments=["test",
+                           "--pkgdir",
+                           os.path.join(packages_dir, dirname)],
+                defaults=defaults,
+                env_root=env_root)
+        except SystemExit, e:
+            fail = (e.code != 0) or fail
+        if fail and defaults.get('stopOnError'):
+            break
+    if fail:
+        print >>sys.stderr, "Some package tests were unsuccessful."
+        sys.exit(-1)
 
 def get_config_args(name, env_root):
     local_json = os.path.join(env_root, "local.json")
@@ -429,10 +464,14 @@ def initializer(env_root, args, out=sys.stdout, err=sys.stderr):
 def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         defaults=None, env_root=os.environ.get('CUDDLEFISH_ROOT'),
         stdout=sys.stdout):
+    versions = get_versions()
+    sdk_version = versions["version"]
+    display_version = "Add-on SDK %s (%s)" % (sdk_version, versions["full"])
     parser_kwargs = dict(arguments=arguments,
                          global_options=global_options,
                          parser_groups=parser_groups,
                          usage=usage,
+                         version=display_version,
                          defaults=defaults)
 
     (options, args) = parse_args(**parser_kwargs)
@@ -467,7 +506,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
             docs_home = generate.generate_docs(env_root, filename=args[1])
         else:
             docs_home = generate.generate_docs(env_root)
-        webbrowser.open(docs_home)
+            webbrowser.open(docs_home)
         return
     elif command == "sdocs":
         from cuddlefish.docs import generate
@@ -499,16 +538,17 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     # a Mozilla application (which includes running tests).
 
     use_main = False
-    timeout = None
     inherited_options = ['verbose', 'enable_e10s']
+    enforce_timeouts = False
 
     if command == "xpi":
         use_main = True
     elif command == "test":
         if 'tests' not in target_cfg:
             target_cfg['tests'] = []
-        timeout = TEST_RUN_TIMEOUT
-        inherited_options.extend(['iterations', 'filter', 'profileMemory'])
+        inherited_options.extend(['iterations', 'filter', 'profileMemory',
+                                  'stopOnError'])
+        enforce_timeouts = True
     elif command == "run":
         use_main = True
     else:
@@ -527,17 +567,6 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         pkg_cfg = packaging.build_config(env_root, target_cfg, options.packagepath)
 
     target = target_cfg.name
-
-    # the harness_guid is used for an XPCOM class ID. We use the
-    # JetpackID for the add-on ID and the XPCOM contract ID.
-    if "harnessClassID" in target_cfg:
-        # For the sake of non-bootstrapped extensions, we allow to specify the
-        # classID of harness' XPCOM component in package.json. This makes it
-        # possible to register the component using a static chrome.manifest file
-        harness_guid = target_cfg["harnessClassID"]
-    else:
-        import uuid
-        harness_guid = str(uuid.uuid4())
 
     # TODO: Consider keeping a cache of dynamic UUIDs, based
     # on absolute filesystem pathname, in the root directory
@@ -565,16 +594,11 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     if "id" in target_cfg:
         jid = target_cfg["id"]
     else:
-        jid = harness_guid
+        import uuid
+        jid = str(uuid.uuid4())
     if not ("@" in jid or jid.startswith("{")):
         jid = jid + "@jetpack"
-    unique_prefix = '%s-' % jid # used for resource: URLs
-    bundle_id = jid
 
-    # the resource: URL's prefix is treated too much like a DNS hostname
-    unique_prefix = unique_prefix.lower()
-    unique_prefix = unique_prefix.replace("@", "-at-")
-    unique_prefix = unique_prefix.replace(".", "-dot-")
 
     targets = [target]
     if command == "test":
@@ -590,12 +614,11 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     deps = packaging.get_deps_for_targets(pkg_cfg, targets)
 
     from cuddlefish.manifest import build_manifest, ModuleNotFoundError
-    uri_prefix = "resource://%s" % unique_prefix
     # Figure out what loader files should be scanned. This is normally
     # computed inside packaging.generate_build_for_target(), by the first
     # dependent package that defines a "loader" property in its package.json.
     # This property is interpreted as a filename relative to the top of that
-    # file, and stored as a URI in build.loader . generate_build_for_target()
+    # file, and stored as a path in build.loader . generate_build_for_target()
     # cannot be called yet (it needs the list of used_deps that
     # build_manifest() computes, but build_manifest() needs the list of
     # loader files that it computes). We could duplicate or factor out this
@@ -610,7 +633,7 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
     loader_modules = [("api-utils", "lib", "cuddlefish", cuddlefish_js_path)]
     scan_tests = command == "test"
     try:
-        manifest = build_manifest(target_cfg, pkg_cfg, deps, uri_prefix, scan_tests,
+        manifest = build_manifest(target_cfg, pkg_cfg, deps, scan_tests,
                                   loader_modules)
     except ModuleNotFoundError, e:
         print str(e)
@@ -628,42 +651,33 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     build = packaging.generate_build_for_target(
         pkg_cfg, target, used_deps,
-        prefix=unique_prefix,  # used to create resource: URLs
         include_dep_tests=options.dep_tests
         )
 
-    if 'resources' in build:
-        resources = build.resources
-        for name in resources:
-            resources[name] = os.path.abspath(resources[name])
-
-    harness_contract_id = ('@mozilla.org/harness-service;1?id=%s' % jid)
     harness_options = {
-        'bootstrap': {
-            'contractID': harness_contract_id,
-            'classID': '{%s}' % harness_guid
-            },
         'jetpackID': jid,
-        'bundleID': bundle_id,
-        'uriPrefix': uri_prefix,
         'staticArgs': options.static_args,
         'name': target,
         }
 
     harness_options.update(build)
 
+    extra_environment = {}
     if command == "test":
         # This should be contained in the test runner package.
+        # maybe just do: target_cfg.main = 'test-harness/run-tests'
         harness_options['main'] = 'test-harness/run-tests'
+        harness_options['mainPath'] = manifest.get_manifest_entry("test-harness", "lib", "run-tests").get_path()
     else:
         harness_options['main'] = target_cfg.get('main')
+        harness_options['mainPath'] = manifest.top_path
+    extra_environment["CFX_COMMAND"] = command
 
     for option in inherited_options:
         harness_options[option] = getattr(options, option)
 
     harness_options['metadata'] = packaging.get_metadata(pkg_cfg, used_deps)
 
-    sdk_version = get_version(env_root)
     harness_options['sdkVersion'] = sdk_version
 
     packaging.call_plugins(pkg_cfg, used_deps)
@@ -676,13 +690,18 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
         mydir = os.path.dirname(os.path.abspath(__file__))
         app_extension_dir = os.path.join(mydir, "app-extension")
 
-    harness_options['manifest'] = manifest.get_harness_options_manifest(uri_prefix)
+
+    if target_cfg.get('preferences'):
+        harness_options['preferences'] = target_cfg.get('preferences')
+
+    harness_options['manifest'] = manifest.get_harness_options_manifest()
+    harness_options['allTestModules'] = manifest.get_all_test_modules()
 
     from cuddlefish.rdf import gen_manifest, RDFUpdate
 
     manifest_rdf = gen_manifest(template_root_dir=app_extension_dir,
                                 target_cfg=target_cfg,
-                                bundle_id=bundle_id,
+                                jid=jid,
                                 update_url=options.update_url,
                                 bootstrap=True,
                                 enable_mobile=options.enable_mobile)
@@ -707,13 +726,18 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
 
     if command == 'xpi':
         from cuddlefish.xpi import build_xpi
+        extra_harness_options = {}
+        for kv in options.extra_harness_option_args:
+            key,value = kv.split("=", 1)
+            extra_harness_options[key] = value
         xpi_path = XPI_FILENAME % target_cfg.name
         print >>stdout, "Exporting extension to %s." % xpi_path
         build_xpi(template_root_dir=app_extension_dir,
                   manifest=manifest_rdf,
                   xpi_path=xpi_path,
                   harness_options=harness_options,
-                  limit_to=used_files)
+                  limit_to=used_files,
+                  extra_harness_options=extra_harness_options)
     else:
         from cuddlefish.runner import run_app
 
@@ -732,13 +756,15 @@ def run(arguments=sys.argv[1:], target_cfg=None, pkg_cfg=None,
                              binary=options.binary,
                              profiledir=options.profiledir,
                              verbose=options.verbose,
-                             timeout=timeout,
+                             enforce_timeouts=enforce_timeouts,
                              logfile=options.logfile,
                              addons=options.addons,
                              args=options.cmdargs,
+                             extra_environment=extra_environment,
                              norun=options.no_run,
                              used_files=used_files,
-                             enable_mobile=options.enable_mobile)
+                             enable_mobile=options.enable_mobile,
+                             mobile_app_name=options.mobile_app_name)
         except Exception, e:
             if str(e).startswith(MOZRUNNER_BIN_NOT_FOUND):
                 print >>sys.stderr, MOZRUNNER_BIN_NOT_FOUND_HELP.strip()

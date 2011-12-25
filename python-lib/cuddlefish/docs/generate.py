@@ -6,7 +6,6 @@ import tarfile
 import StringIO
 
 from cuddlefish import packaging
-from cuddlefish import Bunch
 from cuddlefish.docs import apiparser
 from cuddlefish.docs import apirenderer
 from cuddlefish.docs import webdocs
@@ -78,7 +77,6 @@ def calculate_base_url(base_url, docs_dir):
     return base_url
 
 def generate_named_file(env_root, base_url, filename):
-    docs_dir = os.path.join(env_root, DOCS_DIR)
     web_docs = webdocs.WebDocs(env_root, base_url)
 
     # next, generate api doc or guide doc
@@ -107,6 +105,9 @@ def calculate_current_status(env_root):
             if filename.endswith(".md"):
                 current_status.update(filename)
                 current_status.update(str(os.path.getmtime(os.path.join(dirpath, filename))))
+    base_html_file = os.path.join(env_root, DOCS_DIR, "static-files", "base.html")
+    current_status.update(base_html_file)
+    current_status.update(str(os.path.getmtime(os.path.join(dirpath, base_html_file))))
     return current_status.digest()
 
 def generate_docs_from_scratch(env_root, base_url, docs_dir):
@@ -131,7 +132,8 @@ def generate_docs_from_scratch(env_root, base_url, docs_dir):
     # for each package, generate its docs
     for pkg_name, pkg in pkg_cfg['packages'].items():
         src_dir = pkg.root_dir
-        dest_dir = os.path.join(docs_dir, "packages", pkg_name)
+        package_dirname = os.path.basename(src_dir)
+        dest_dir = os.path.join(docs_dir, "packages", package_dirname)
         os.mkdir(dest_dir)
 
         src_readme = os.path.join(src_dir, "README.md")
@@ -142,7 +144,7 @@ def generate_docs_from_scratch(env_root, base_url, docs_dir):
         # create the package page
         package_filename = os.path.join(dest_dir, pkg_name + ".html")
         if not os.path.exists(package_filename):
-            package_doc_html = web_docs.create_package_page(src_dir)
+            package_doc_html = web_docs.create_package_page(pkg_name)
             open(package_filename, "w").write(package_doc_html)
 
         # generate all the API docs
