@@ -19,6 +19,7 @@
     </em:targetApplication>
 
     <em:targetPlatform>Darwin</em:targetPlatform>
+    <em:targetPlatform>WINNT</em:targetPlatform>
 
     <!-- Front End MetaData -->
     <em:name>Test App</em:name>
