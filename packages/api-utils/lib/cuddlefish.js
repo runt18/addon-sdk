@@ -201,7 +201,7 @@ const Loader = {
     let requirement = manifest && manifest.requirements[id];
     if (!requirement)
         throw Error("Module: " + (requirer && requirer.id) + ' located at ' +
-                    base + " has no authority to load: " + id);
+                    base + " has no authority to load: " + id  + "\nmanifest=" + JSON.stringify(this.manifest) + "\nmodules=" + JSON.stringify(this.manifest));
     let path = requirement.path;
 
     if (path in this.modules) {
