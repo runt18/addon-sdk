@@ -13,7 +13,7 @@
     <em:targetApplication>
       <Description>
         <em:id>{ec8030f7-c20a-464f-9b0e-13a3a9e97384}</em:id>
-        <em:minVersion>6.0</em:minVersion>
+        <em:minVersion>8.0</em:minVersion>
         <em:maxVersion>12.0a1</em:maxVersion>
       </Description>
     </em:targetApplication>
@@ -28,7 +28,7 @@
     <em:iconURL></em:iconURL>
     <em:icon64URL></em:icon64URL>
     <em:homepageURL></em:homepageURL>
-    <em:optionsURL></em:optionsURL>
+    <em:optionsType></em:optionsType>
     <em:updateURL></em:updateURL>
   </Description>
 </RDF>
