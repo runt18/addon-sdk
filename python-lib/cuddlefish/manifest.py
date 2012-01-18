@@ -625,6 +625,7 @@ def scan_requirements_with_grep(fn, lines):
     requires = {}
     first_location = {}
     for (lineno0, line) in enumerate(lines):
+        line = line.replace(",", ";")
         for clause in line.split(";"):
             clause = clause.strip()
             iscomment = False
