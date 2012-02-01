@@ -1,3 +1,7 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 "use strict";
 
 let Ci = Components.interfaces;
@@ -692,11 +696,20 @@ function handlerMaker(obj) {
       
       // Overload toString in order to avoid returning "[XrayWrapper [object HTMLElement]]"
       // or "[object Function]" for function's Proxy
-      if (name == "toString")
-        return wrap(obj.wrappedJSObject ? obj.wrappedJSObject.toString
-                                        : obj.toString,
-                    obj, name);
-      
+      if (name == "toString") {
+        if ("wrappedJSObject" in obj) {
+          // Bug 714778: we should not pass obj.wrappedJSObject.toString
+          // in order to avoid sharing its proxy over contents scripts:
+          return wrap(function () {
+            return obj.wrappedJSObject.toString.call(
+                     this.valueOf(UNWRAP_ACCESS_KEY), arguments);
+          }, obj, name);
+        }
+        else {
+          return wrap(obj.toString, obj, name);
+        }
+      }
+
       // Offer a way to retrieve XrayWrapper from a proxified node through `valueOf`
       if (name == "valueOf")
         return function (key) {
