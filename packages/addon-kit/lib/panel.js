@@ -119,7 +119,7 @@ const Panel = Symbiont.resolve({
       // Jetpack, as we would like to display an iframe that completely fills 
       // the panel. 
       // -> Use a XBL wrapper with inner stylesheet to remove this padding.
-      let css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 3px}";
+      let css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 1px}";
       if (!anchor) {
           css = ".panel-inner-arrowcontent, .panel-arrowcontent {padding: 0px}";
       }
@@ -141,8 +141,8 @@ const Panel = Symbiont.resolve({
       frame.setAttribute('flex', '1');
       frame.setAttribute('transparent', 'transparent');
       if (runtime.OS === "Darwin") {
-        frame.style.borderRadius = "6px";
-        frame.style.padding = "1px";
+        frame.style.borderRadius = "4px";
+        frame.style.padding = "0px";
       }
       
       // Load an empty document in order to have an immediatly loaded iframe, 
