@@ -274,6 +274,7 @@ const Panel = Symbiont.resolve({
    * frame and hidden frame to preserve state of the content dom.
    */
   _onShow: function _onShow() {
+    if (!this._xulPanel) return;
     try {
       if (!this._inited) { // defer if not initialized yet
         this.on('inited', this._onShow.bind(this));
