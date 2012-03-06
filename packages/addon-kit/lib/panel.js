@@ -55,12 +55,13 @@ const Panel = Symbiont.resolve({
    * have no effect.
    */
   set _frameLoadersSwapped(value) {
-	  if (!this.__xulPanel) return;
-	  
     if (this.__frameLoadersSwapped == value) return;
-    this._frame.QueryInterface(Ci.nsIFrameLoaderOwner)
-      .swapFrameLoaders(this._viewFrame);
-    this.__frameLoadersSwapped = value;
+	
+	var viewFrame = this._viewFrame;
+	if (viewFrame) {
+	    this._frame.QueryInterface(Ci.nsIFrameLoaderOwner).swapFrameLoaders(viewFrame);
+	    this.__frameLoadersSwapped = value;
+	}
   },
   __frameLoadersSwapped: false,
 
@@ -257,7 +258,7 @@ const Panel = Symbiont.resolve({
     this.__xulPanel = value;
   },
   __xulPanel: null,
-  get _viewFrame() this.__xulPanel.children[0], 
+  get _viewFrame() (this.__xulPanel && this.__xulPanel.children && this.__xulPanel.children.length > 0) ? this.__xulPanel.children[0] : null, 
   /**
    * When the XUL panel becomes hidden, we swap frame loaders back to move
    * the content of the panel to the hidden frame & remove panel element.
