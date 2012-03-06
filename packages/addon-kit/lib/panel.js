@@ -55,6 +55,8 @@ const Panel = Symbiont.resolve({
    * have no effect.
    */
   set _frameLoadersSwapped(value) {
+	  if (!this.__xulPanel) return;
+	  
     if (this.__frameLoadersSwapped == value) return;
     this._frame.QueryInterface(Ci.nsIFrameLoaderOwner)
       .swapFrameLoaders(this._viewFrame);
